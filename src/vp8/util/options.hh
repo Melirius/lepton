@@ -4,7 +4,7 @@
 enum {
     VECTORIZE = 1,
     MICROVECTORIZE = 1,
-    MAX_NUM_THREADS = 1,//8,
+    MAX_NUM_THREADS = 8,//1,//
     SIMD_WIDTH = 1
 };
 extern unsigned int NUM_THREADS;

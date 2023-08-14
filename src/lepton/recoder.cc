@@ -358,7 +358,7 @@ bool recode_one_mcu_row(abitwriter *huffw, int mcu,
             lastdc[ cmp ] = dc;
 
             // encode block
-            /*int eob = encode_block_seq(huffw,
+            int eob = encode_block_seq(huffw,
                                        &(hcodes[ 0 ][ cmpnfo[cmp].huffdc ]),
                                        &(hcodes[ 1 ][ cmpnfo[cmp].huffac ]),
                                        block.begin() );
@@ -377,14 +377,14 @@ bool recode_one_mcu_row(abitwriter *huffw, int mcu,
             }
             if (str_out->has_exceeded_bound()) {
                 sta = 2;
-            }*/
-                int old_mcu = mcu;
+            }
+                /*int old_mcu = mcu;
                 if (__builtin_expect(framebuffer.size() == 1 || framebuffer[1] == NULL, 0)) {
                     sta = next_mcuposn(&cmp, &dpos, &rstw );
                     mcu = dpos / mcumul;
                 } else {
                     sta = next_mcupos( &mcu, &cmp, &csc, &sub, &dpos, &rstw, cmpc); // we can pass in cmpc instead of CMPC
-                }
+                }*/
 
             if (old_mcu != mcu && mcu % mcuh == 0) {
                 end_of_row = true;
@@ -395,11 +395,11 @@ bool recode_one_mcu_row(abitwriter *huffw, int mcu,
         }
 
         // pad huffman writer
-        /*huffw->pad( padbit );
+        huffw->pad( padbit );
         if (huffw->no_remainder()) {
             escape_0xff_huffman_and_write(str_out, huffw->peekptr(), huffw->getpos());
             huffw->reset();
-        }*/
+        }
         // evaluate status
         if ( sta == -1 ) { // status -1 means error
             delete huffw;
@@ -423,7 +423,7 @@ bool recode_one_mcu_row(abitwriter *huffw, int mcu,
                 lastdc.memset(0);
             }
         }
-        //always_assert(huffw->no_remainder() && "this should have been padded");
+        always_assert(huffw->no_remainder() && "this should have been padded");
     }
     return true;
 }
@@ -497,9 +497,9 @@ ThreadHandoff recode_row_range(BoundedWriter *stream_out,
                                abitwriter *huffw) {
     ThreadHandoff retval = thread_handoff;
 
-    /*huffw->fillbit = padbit;
+    huffw->fillbit = padbit;
     huffw->reset_from_overhang_byte_and_num_bits(retval.overhang_byte,
-                                                retval.num_overhang_bits);*/
+                                                retval.num_overhang_bits);
     int decode_index = 0;
     while (true) {
         LeptonCodec_RowSpec cur_row = LeptonCodec_row_spec_from_index(decode_index++,
@@ -543,7 +543,7 @@ ThreadHandoff recode_row_range(BoundedWriter *stream_out,
                                      framebuffer) ) {
                 custom_exit(ExitCode::CODING_ERROR);
             }
-            /*const unsigned char * flushed_data = huffw->partial_bytewise_flush();
+            const unsigned char * flushed_data = huffw->partial_bytewise_flush();
             escape_0xff_huffman_and_write(stream_out, flushed_data, huffw->getpos() );
             huffw->reset_crystallized_bytes();
             if (!huffw->bound_reached()) {
@@ -555,7 +555,7 @@ ThreadHandoff recode_row_range(BoundedWriter *stream_out,
             }
             if ( huffw->error ) {
                 custom_exit(ExitCode::CODING_ERROR);
-            }*/
+            }
         }
     }
     return retval;
@@ -610,8 +610,8 @@ void recode_physical_thread(BoundedWriter *stream_out,
             th = tmp; // copy the dynamic data in
         } else {
             dev_assert(memcmp(thread_handoffs[logical_thread_id].last_dc.begin(), th.last_dc.begin(), sizeof(th.last_dc)) == 0);
-            /*dev_assert(th.overhang_byte == thread_handoffs[logical_thread_id].overhang_byte);
-            dev_assert(th.num_overhang_bits == thread_handoffs[logical_thread_id].num_overhang_bits);*/
+            dev_assert(th.overhang_byte == thread_handoffs[logical_thread_id].overhang_byte);
+            dev_assert(th.num_overhang_bits == thread_handoffs[logical_thread_id].num_overhang_bits);
             th = thread_handoffs[logical_thread_id];
             // in the v1 encoding, the first thread's output is unbounded in size but
             // following threads are bound to their segment_size.
@@ -650,15 +650,15 @@ void recode_physical_thread(BoundedWriter *stream_out,
                 thread_handoffs[logical_thread_id+1].luma_y_end || ujgversion ==1 ) {
             // make sure we computed the same item that was stored
                 if (g_threaded) {
-                    /*always_assert(outth.num_overhang_bits ==  thread_handoffs[logical_thread_id + 1].num_overhang_bits);
-                    always_assert(outth.overhang_byte ==  thread_handoffs[logical_thread_id + 1].overhang_byte);*/
+                    always_assert(outth.num_overhang_bits ==  thread_handoffs[logical_thread_id + 1].num_overhang_bits);
+                    always_assert(outth.overhang_byte ==  thread_handoffs[logical_thread_id + 1].overhang_byte);
                 }
                 if (g_threaded || thread_handoffs[logical_thread_id + 1].segment_size > 1) {
                     always_assert(memcmp(outth.last_dc.begin(), thread_handoffs[logical_thread_id + 1].last_dc.begin(), sizeof(outth.last_dc)) == 0);
                 }
             }
             if (physical_thread_id > 0 && stream_out->bytes_written()) { // if 0 are written the bound is not tight
-                /*always_assert(stream_out->get_bound() == stream_out->bytes_written());*/
+                always_assert(stream_out->get_bound() == stream_out->bytes_written());
             }
         }
         th = outth;
