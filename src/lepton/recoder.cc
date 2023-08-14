@@ -1,3 +1,6 @@
+#include <fstream>
+
+
 /* -*-mode:c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
 #include <time.h>
 #include <stdio.h>
@@ -312,9 +315,12 @@ int encode_block_seq( abitwriter* huffw, huffCodes* dctbl, huffCodes* actbl, sho
     return end + 1;
 }
 
+using BlockDCT = std::array<int16_t, 64>;
+std::array<std::vector<BlockDCT>, 4> DCT_coefs;
+
 template <class OutputWriter>
 bool recode_one_mcu_row(abitwriter *huffw, int mcu,
-                        OutputWriter*str_out,
+                        OutputWriter *str_out,
                         Sirikata::Array1d<int16_t, (size_t)ColorChannel::NumBlockTypes> &lastdc,
                         const BlockBasedImagePerChannel<true> framebuffer) {
     int cmp = cs_cmp[ 0 ];
@@ -343,13 +349,16 @@ bool recode_one_mcu_row(abitwriter *huffw, int mcu,
                 block[bpos] = aligned_block.coefficients_zigzag(bpos);
             }
 
+            for ( int bpos = 0; bpos < 64; bpos++ )
+                DCT_coefs[cmp][dpos][unzigzag[bpos]] = block[bpos];
+
             int16_t dc = block[0];
             // diff coding for dc
             block[ 0 ] -= lastdc[ cmp ];
             lastdc[ cmp ] = dc;
 
             // encode block
-            int eob = encode_block_seq(huffw,
+            /*int eob = encode_block_seq(huffw,
                                        &(hcodes[ 0 ][ cmpnfo[cmp].huffdc ]),
                                        &(hcodes[ 1 ][ cmpnfo[cmp].huffac ]),
                                        block.begin() );
@@ -368,7 +377,15 @@ bool recode_one_mcu_row(abitwriter *huffw, int mcu,
             }
             if (str_out->has_exceeded_bound()) {
                 sta = 2;
-            }
+            }*/
+                int old_mcu = mcu;
+                if (__builtin_expect(framebuffer.size() == 1 || framebuffer[1] == NULL, 0)) {
+                    sta = next_mcuposn(&cmp, &dpos, &rstw );
+                    mcu = dpos / mcumul;
+                } else {
+                    sta = next_mcupos( &mcu, &cmp, &csc, &sub, &dpos, &rstw, cmpc); // we can pass in cmpc instead of CMPC
+                }
+
             if (old_mcu != mcu && mcu % mcuh == 0) {
                 end_of_row = true;
                 if (sta == 0) {
@@ -378,11 +395,11 @@ bool recode_one_mcu_row(abitwriter *huffw, int mcu,
         }
 
         // pad huffman writer
-        huffw->pad( padbit );
+        /*huffw->pad( padbit );
         if (huffw->no_remainder()) {
             escape_0xff_huffman_and_write(str_out, huffw->peekptr(), huffw->getpos());
             huffw->reset();
-        }
+        }*/
         // evaluate status
         if ( sta == -1 ) { // status -1 means error
             delete huffw;
@@ -406,7 +423,7 @@ bool recode_one_mcu_row(abitwriter *huffw, int mcu,
                 lastdc.memset(0);
             }
         }
-        always_assert(huffw->no_remainder() && "this should have been padded");
+        //always_assert(huffw->no_remainder() && "this should have been padded");
     }
     return true;
 }
@@ -436,7 +453,7 @@ unsigned int handle_initial_segments( bounded_iostream * const str_out )
         /* step 4: if it's a DHT (0xC4), DRI (0xDD), or SOS (0xDA), parse to mutable globals */
         if ( type == 0xC4 || type == 0xDD || type == 0xDA ) {
             /* XXX make sure parse_jfif_jpg can't overrun hdrdata */
-            if ( !parse_jfif_jpg( type, len, hdrs - byte_position > len ? len : hdrs - byte_position, hdrdata + byte_position ) ) { return -1; }
+            if (!parse_jfif_jpg( type, len, hdrs - byte_position > len ? len : hdrs - byte_position, hdrdata + byte_position ) ) { return -1; }
         }
 
         /* step 5: we parsed the header -- accumulate byte position */
@@ -480,9 +497,9 @@ ThreadHandoff recode_row_range(BoundedWriter *stream_out,
                                abitwriter *huffw) {
     ThreadHandoff retval = thread_handoff;
 
-    huffw->fillbit = padbit;
+    /*huffw->fillbit = padbit;
     huffw->reset_from_overhang_byte_and_num_bits(retval.overhang_byte,
-                                                retval.num_overhang_bits);
+                                                retval.num_overhang_bits);*/
     int decode_index = 0;
     while (true) {
         LeptonCodec_RowSpec cur_row = LeptonCodec_row_spec_from_index(decode_index++,
@@ -526,7 +543,7 @@ ThreadHandoff recode_row_range(BoundedWriter *stream_out,
                                      framebuffer) ) {
                 custom_exit(ExitCode::CODING_ERROR);
             }
-            const unsigned char * flushed_data = huffw->partial_bytewise_flush();
+            /*const unsigned char * flushed_data = huffw->partial_bytewise_flush();
             escape_0xff_huffman_and_write(stream_out, flushed_data, huffw->getpos() );
             huffw->reset_crystallized_bytes();
             if (!huffw->bound_reached()) {
@@ -538,7 +555,7 @@ ThreadHandoff recode_row_range(BoundedWriter *stream_out,
             }
             if ( huffw->error ) {
                 custom_exit(ExitCode::CODING_ERROR);
-            }
+            }*/
         }
     }
     return retval;
@@ -557,6 +574,7 @@ std::pair<int, int> logical_thread_range_from_physical_thread_id(int physical_th
     }
     return std::pair<int, int>(logical_thread_start, logical_thread_end);
 }
+
 template<class BoundedWriter>
 void recode_physical_thread(BoundedWriter *stream_out,
                             BlockBasedImagePerChannel<true> &framebuffer,
@@ -592,8 +610,8 @@ void recode_physical_thread(BoundedWriter *stream_out,
             th = tmp; // copy the dynamic data in
         } else {
             dev_assert(memcmp(thread_handoffs[logical_thread_id].last_dc.begin(), th.last_dc.begin(), sizeof(th.last_dc)) == 0);
-            dev_assert(th.overhang_byte == thread_handoffs[logical_thread_id].overhang_byte);
-            dev_assert(th.num_overhang_bits == thread_handoffs[logical_thread_id].num_overhang_bits);
+            /*dev_assert(th.overhang_byte == thread_handoffs[logical_thread_id].overhang_byte);
+            dev_assert(th.num_overhang_bits == thread_handoffs[logical_thread_id].num_overhang_bits);*/
             th = thread_handoffs[logical_thread_id];
             // in the v1 encoding, the first thread's output is unbounded in size but
             // following threads are bound to their segment_size.
@@ -632,15 +650,15 @@ void recode_physical_thread(BoundedWriter *stream_out,
                 thread_handoffs[logical_thread_id+1].luma_y_end || ujgversion ==1 ) {
             // make sure we computed the same item that was stored
                 if (g_threaded) {
-                    always_assert(outth.num_overhang_bits ==  thread_handoffs[logical_thread_id + 1].num_overhang_bits);
-                    always_assert(outth.overhang_byte ==  thread_handoffs[logical_thread_id + 1].overhang_byte);
+                    /*always_assert(outth.num_overhang_bits ==  thread_handoffs[logical_thread_id + 1].num_overhang_bits);
+                    always_assert(outth.overhang_byte ==  thread_handoffs[logical_thread_id + 1].overhang_byte);*/
                 }
                 if (g_threaded || thread_handoffs[logical_thread_id + 1].segment_size > 1) {
                     always_assert(memcmp(outth.last_dc.begin(), thread_handoffs[logical_thread_id + 1].last_dc.begin(), sizeof(outth.last_dc)) == 0);
                 }
             }
             if (physical_thread_id > 0 && stream_out->bytes_written()) { // if 0 are written the bound is not tight
-                always_assert(stream_out->get_bound() == stream_out->bytes_written());
+                /*always_assert(stream_out->get_bound() == stream_out->bytes_written());*/
             }
         }
         th = outth;
@@ -688,6 +706,107 @@ void recode_physical_first_thread_wrapper(bounded_iostream*stream_out,
                            physical_thread_id,
                            huffw);
 }
+
+//////////////////////////////////////////////////////////////////////////////////////
+
+struct culep_output
+{
+    /// At most four image planes.
+    unsigned char * channels[4];
+    /// The pitch of each of the image planes.
+    size_t pitch[4];
+};
+
+struct culep_block_buffer
+{
+    /// \brief Pass the number of blocks for error checking.
+    ///
+    /// Should be `block_x[c] = ceil(img_x[c], 8)`.
+    int block_x[4];
+    /// \brief Pass the number of blocks for error checking.
+    ///
+    /// Should be `block_y[c] = ceil(img_y[c], 8)`.
+    int block_y[4];
+    /// Host buffer large enough to hold the DCT coefficients.
+    BlockDCT * dct_buffer_host[4];
+    /// Device buffer large enough to hold the DCT coefficients.
+    //dct_matrix* dct_buffer_device[4];
+};
+
+/// https://en.wikipedia.org/wiki/JPEG#Decoding
+void decode_cpu_impl(const int (&img_x)[4],
+                     const int (&img_y)[4],
+                     int component_count,
+                     const culep_output& output,
+                     const culep_block_buffer& block_buffer,
+                     const uint16_t (&q_tables)[4][64])
+{
+    for(int c = 0; c < component_count; c++)
+    {
+        // image size in blocks
+        const int img_x_block = (img_x[c] + 7) / 8;
+        const int img_y_block = (img_y[c] + 7) / 8;
+        assert(img_x_block == block_buffer.block_x[c] && img_y_block == block_buffer.block_y[c]);
+
+        const uint16_t(&q_table)[64] = q_tables[c];
+
+        for(int by = 0; by < img_y_block; by++)
+        {
+            for(int bx = 0; bx < img_x_block; bx++)
+            {
+                size_t    idx_block = by * img_x_block + bx;
+                BlockDCT& coeff     = block_buffer.dct_buffer_host[c][idx_block];
+                // pixel coordinates of current block
+                int start_x = bx * 8;
+                int start_y = by * 8;
+                // handle all pixels in the block
+                for(int y = 0; y < 8; y++)
+                {
+                    for(int x = 0; x < 8; x++)
+                    {
+                        int pixel_x = start_x + x;
+                        int pixel_y = start_y + y;
+                        // either because of block rounding up or subsampling rounding up
+                        if(pixel_x >= img_x[c] || pixel_y >= img_y[c])
+                        {
+                            continue;
+                        }
+                        float sum = 0;
+                        for(int v = 0; v < 8; v++) // y
+                        {
+                            float norm_v = v == 0 ? M_SQRT1_2 : 1.0f;
+                            float cos_v
+                                = cosf((2.0f * static_cast<float>(y) + 1.0f) * v * float(M_PI) / 16.0f);
+                            for(int u = 0; u < 8; u++) // x
+                            {
+                                float norm_u = u == 0 ? M_SQRT1_2 : 1.0f;
+                                float cos_u  = cosf((2.0f * static_cast<float>(x) + 1.0f) * u * float(M_PI)
+                                                   / 16.0f);
+                                int   idx_in_block = v * 8 + u;
+                                // invert quantization
+                                float q_dct_uv = static_cast<float>(coeff[idx_in_block])
+                                                 * q_table[idx_in_block];
+                                sum += norm_u * norm_v * q_dct_uv * cos_u * cos_v;
+                            }
+                        }
+                        sum *= 0.25f;
+                        uint8_t val     = roundf(fmax(0.0f, fminf(sum + 128.0f, 255.0f)));
+                        size_t  out_idx = pixel_y * output.pitch[c] + pixel_x;
+                        output.channels[c][out_idx] = val;
+                    }
+                }
+            }
+        }
+    }
+}
+
+
+
+
+
+
+
+
 /* -----------------------------------------------
     JPEG encoding routine
     ----------------------------------------------- */
@@ -751,6 +870,13 @@ bool recode_baseline_jpeg(bounded_iostream*str_out,
     huffws.memset(0);
     for (size_t i = 0; i < NUM_THREADS; ++i) {
         huffws[i] = new abitwriter(65536, max_file_size);
+    }
+
+    // set vector sizes for DCT coeffs
+    {
+        auto bs = colldata.get_component_size_in_blocks();
+        for(size_t i = 0; i < 3; ++i)
+            DCT_coefs[i].resize(bs[i]);
     }
 
     for (unsigned int physical_thread_id = 0; physical_thread_id < (g_threaded ? NUM_THREADS : 1); ++physical_thread_id) {
@@ -844,6 +970,78 @@ bool recode_baseline_jpeg(bounded_iostream*str_out,
             str_out->write_byte(rst);
 
         }
+    }
+
+    {
+        extern int imgwidth; // width of image
+        extern int imgheight; // height of image
+        int widths[4] = {};
+        int heights[4] = {};
+        unsigned char * planes[4] = {};
+        uint16_t q_tables[4][64] = {};
+
+/*
+        std::ofstream output("test.txt", std::ios::binary);
+        for(int cmp = 0; cmp < 3; ++cmp)
+        {
+            const int size = DCT_coefs[cmp].size();
+            output << "Component "<< cmp << ", " << size << " blocks\n";
+
+            for(int i = 0; i < size; ++i)
+            {
+                for(int j = 0; j < 63; ++j)
+                    output << DCT_coefs[cmp][i][j] << ", ";
+                output << DCT_coefs[cmp][i][63] << "\n";
+            }
+        }
+
+        for(int cmp = 0; cmp < 3; ++cmp)
+        {
+            // TODO: put right numbers for subsampling
+            widths[cmp] = imgwidth;
+            heights[cmp] = imgheight;
+            unsigned char * plane = (unsigned char *)malloc(widths[cmp] * heights[cmp]);
+            if(plane != nullptr)
+                planes[cmp] = plane;
+
+            memcpy(q_tables[cmp], colldata.get_quantization_tables((BlockType)cmp), 64*sizeof(uint16_t));
+        }
+        // convert DCT to pixels
+        culep_output out
+        {
+            .channels = {planes[0], planes[1], planes[2], planes[3]}, 
+            .pitch = {size_t(widths[0]), size_t(widths[1]), size_t(widths[2]), size_t(widths[3])}
+        };
+        culep_block_buffer buf
+        {
+            .block_x = {cmpnfo[0].bch, cmpnfo[1].bch, cmpnfo[2].bch, cmpnfo[3].bch},
+            .block_y = {cmpnfo[0].bcv, cmpnfo[1].bcv, cmpnfo[2].bcv, cmpnfo[3].bcv},
+            .dct_buffer_host = {DCT_coefs[0].data(), DCT_coefs[1].data(), DCT_coefs[2].data(), DCT_coefs[3].data()}
+        };
+        const int (*img_x)[4] = reinterpret_cast<const int (*)[4]>(widths);
+        const int (*img_y)[4] = reinterpret_cast<const int (*)[4]>(heights);
+
+        decode_cpu_impl(*img_x, *img_y, 3, out, buf, q_tables);
+
+        // simple PPM writer
+        std::ofstream output_img("test.ppm", std::ios::binary);
+        std::ofstream output_rgb("testRGB.ppm", std::ios::binary);
+        output_img << "P3\n"<< imgwidth << " " << imgheight << "\n255\n";
+        output_rgb << "P3\n"<< imgwidth << " " << imgheight << "\n255\n";
+
+        int ind = 0;
+        for(int y = 0; y < imgheight; ++y)
+            for(int x = 0; x < imgwidth; ++x)
+            {
+                uint8_t R = planes[0][ind] + 1.402 * (planes[2][ind] - 128);
+                uint8_t G = planes[0][ind] - 0.344136 * (planes[1][ind] - 128) - 0.714136 * (planes[2][ind] - 128);
+                uint8_t B = planes[0][ind] + 1.772 * (planes[1][ind] - 128);
+
+                output_img << int(planes[0][ind]) << " " << int(planes[1][ind]) << " " << int(planes[2][ind]) << "\n";
+                output_rgb << int(R) << " " << int(G) << " " << int(B) << "\n";
+                ++ind;
+            }
+*/
     }
 
     /* step 3: blit any trailing data */

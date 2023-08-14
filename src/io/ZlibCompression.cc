@@ -85,7 +85,7 @@ std::pair<std::vector<uint8_t, JpegAllocator<uint8_t> >,
     std::pair<std::vector<uint8_t, JpegAllocator<uint8_t> >, JpegError> retval (std::vector<uint8_t, JpegAllocator<uint8_t> >(alloc),
                                                       JpegError::nil());
     retval.first.resize(size * 2);
-    size_t retval_size  = 0;
+    size_t retval_size = 0;
     int ret = inflateInit(&strm);
     if (ret != Z_OK) {
         retval.second = JpegError::errShortHuffmanData();

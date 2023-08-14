@@ -68,7 +68,7 @@ abitreader::~abitreader( void )
 	constructor for abitwriter class
 	----------------------------------------------- */	
 
-abitwriter::abitwriter( int size , int max_file_size)
+abitwriter::abitwriter(int size , int max_file_size)
 {
     size_bound = max_file_size;
     if (size_bound) {

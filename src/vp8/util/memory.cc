@@ -162,13 +162,13 @@ void * custom_calloc(size_t size) {
 #endif
 }
 }
-bool g_use_seccomp =
-#ifndef __linux__
+bool g_use_seccomp = false;
+/*#ifndef __linux__
     false
 #else
     true
 #endif
-    ;
+    ;*/
 void* operator new (size_t size) throw(std::bad_alloc){
  void* ptr = custom_malloc(size); 
  if (ptr == 0) {// did malloc succeed?

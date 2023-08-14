@@ -41,6 +41,7 @@ volatile int volatile1024 = 1024;
 #include <memory>
 #include <atomic>
 #include <signal.h>
+#include <iostream>
 #ifndef _WIN32
 #include <sys/time.h>
 #include <sys/types.h>
@@ -818,8 +819,12 @@ int EMSCRIPTEN_KEEPALIVE main(void) {
     return error_cnt == 0 ? 0 : 1;
 }
 #else
+
+std::chrono::time_point<std::chrono::high_resolution_clock> time_start, time_end;
+
 int app_main( int argc, char** argv )
 {
+    time_start = std::chrono::high_resolution_clock::now();
     g_argc = argc;
     g_argv = (const char **)argv;
     TimingHarness::timing[0][TimingHarness::TS_MAIN]
@@ -972,7 +977,6 @@ int app_main( int argc, char** argv )
         fprintf( msgout,  " avrg. comp. ratio : %8.2f %%\n", cr );
         fprintf( msgout,  " --------------------------------- \n" );
     }
-
 
     return error_cnt == 0 ? 0 : 1;
 }
@@ -1730,7 +1734,7 @@ void process_file(IOUtil::FileReader* reader,
         } else if (NUM_THREADS > 1 && g_threaded && (action == socketserve || action == forkserve)) {
             g_decoder->registerWorkers(get_worker_threads(NUM_THREADS), NUM_THREADS);
         }
-    }else if (filetype == UJG) {
+    } else if (filetype == UJG) {
         (void)read_fixed_ujpg_header();
         g_decoder = new SimpleComponentDecoder;
         g_reference_to_free.reset(g_decoder);
@@ -2024,6 +2028,35 @@ void process_file(IOUtil::FileReader* reader,
     if (errorlevel.load()) {
         custom_exit(ExitCode::UNSUPPORTED_JPEG); // custom exit will delete generic_workers
     } else {
+
+        extern std::chrono::time_point<std::chrono::high_resolution_clock> time_start, time_end;
+        time_end = std::chrono::high_resolution_clock::now();
+        auto duration = std::chrono::duration_cast<std::chrono::microseconds>(time_end - time_start);
+        std::cout.precision(6);
+        std::cout.setf(std::ios::fixed, std:: ios::floatfield);
+        std::cout << "DCT restored in " << duration.count() / 1000000. << " s" << std::endl;
+/*
+using BlockDCT = std::array<int16_t, 64>;
+extern std::array<std::vector<BlockDCT>, 4> DCT_coefs;
+
+        FILE * f = fopen("test.txt", "w");
+        if(f)
+        {
+            for(int cmp = 0; cmp < 3; ++cmp)
+            {
+                const int size = DCT_coefs[cmp].size();
+                fprintf(f, "Component %i, %i blocks\n", cmp, size);
+
+                for(int i = 0; i < size; ++i)
+                {
+                    for(int j = 0; j < 63; ++j)
+                        fprintf(f, "%hi, ", DCT_coefs[cmp][i][j]);
+                    fprintf(f, "%hi\n", DCT_coefs[cmp][i][63]);
+                }
+            }
+            fclose(f);
+        }
+*/
         custom_exit(ExitCode::SUCCESS);
     }
     reset_buffers();
@@ -3308,6 +3341,12 @@ bool decode_jpeg(const std::vector<std::pair<uint32_t, uint32_t> > & huff_input_
 
 bool recode_jpeg( void )
 {
+    // FILE * DCT_file = fopen("DCT.txt", "wb");
+    // if (DCT_file == NULL)
+    // {
+    //     custom_exit(ExitCode::EARLY_EXIT);
+    // }
+    
     if (!g_use_seccomp) {
         pre_byte = clock();
     }
@@ -3436,9 +3475,17 @@ bool recode_jpeg( void )
                         // copy from colldata
                         const AlignedBlock &aligned_block = colldata.block((BlockType)cmp, dpos);
                         //fprintf(stderr, "Reading from cmp(%d) dpos %d\n", cmp, dpos);
+
+                        // fprintf(DCT_file, "%i\n", dpos);
+
                         for ( bpos = 0; bpos < 64; bpos++ ) {
                             block[bpos] = aligned_block.coefficients_zigzag(bpos);
+
+                            // fprintf(DCT_file, "%i,", (int)block[bpos]);
                         }
+
+                        // fprintf(DCT_file, "\n");
+
                         int16_t dc = block[0];
                         // diff coding for dc
                         block[ 0 ] -= lastdc[ cmp ];
@@ -3717,6 +3764,7 @@ bool recode_jpeg( void )
     if ( !rstp.empty() )
         rstp.at(rstc) = hufs;
 
+    // fclose(DCT_file);
 
     return true;
 }
@@ -3766,11 +3814,13 @@ bool check_value_range( void )
 }
 
 
-class ThreadHandoffSegmentCompare {
-public: bool operator() (const ThreadHandoff &a,
-                         const ThreadHandoff &b) const {
-    return a.segment_size < b.segment_size;
-}
+class ThreadHandoffSegmentCompare 
+{
+public:
+    bool operator() (const ThreadHandoff &a, const ThreadHandoff &b) const
+    {
+        return a.segment_size < b.segment_size;
+    }
 };
 
 /* -----------------------------------------------
@@ -4219,7 +4269,7 @@ bool read_ujpg( void )
     // beginning here: recovery information (needed for exact JPEG recovery)
 
     // read padbit information from file
-    ReadFull(header_reader, ujpg_mrk, 3 );
+    ReadFull(header_reader, ujpg_mrk, 3);
     // check marker
     if ( memcmp( ujpg_mrk, "P0D", 3 ) == 0 ) {
         // This is a more nuanced pad byte that can have different values per bit
@@ -4533,6 +4583,7 @@ bool setup_imginfo_jpg(bool only_allocate_two_image_rows)
     size_t start_allocated = Sirikata::memmgr_size_allocated();
     // alloc memory for further operations
     colldata.init(cmpnfo, cmpc, mcuh, mcuv, jpegtype == 1 && only_allocate_two_image_rows);
+    //colldata.init(cmpnfo, cmpc, mcuh, mcuv, false);
     size_t end_allocated = Sirikata::memmgr_size_allocated();
     total_framebuffer_allocated = end_allocated - start_allocated;
     return true;
@@ -5450,7 +5501,6 @@ int next_mcuposn( int* cmp, int* dpos, int* rstw )
     if ( (*dpos) >= cmpnfo[(*cmp)].bc ) return 2;
     else if ( rsti > 0 )
         if ( --(*rstw) == 0 ) return 1;
-
 
     return 0;
 }

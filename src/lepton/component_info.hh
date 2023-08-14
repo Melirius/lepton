@@ -25,7 +25,6 @@ struct componentInfo {
         always_assert(sfv && "zero sfv");
         always_assert(sfh && "zero sfh");
     }
-
 };
 
 #endif

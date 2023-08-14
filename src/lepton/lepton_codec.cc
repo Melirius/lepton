@@ -309,7 +309,7 @@ CodingReturnValue LeptonCodec<BoolDecoder>::ThreadState::vp8_decode_thread(unsig
 }
 
 
-template<class BoolDecoder> void LeptonCodec<BoolDecoder>::worker_thread(ThreadState *ts, int thread_id, UncompressedComponents * const colldata,
+template<class BoolDecoder> void LeptonCodec<BoolDecoder>::worker_thread(ThreadState * ts, int thread_id, UncompressedComponents * const colldata,
                                         int8_t thread_target[Sirikata::MuxReader::MAX_STREAM_ID],
                                         GenericWorker *worker,
                                         VP8ComponentDecoder_SendToActualThread *send_to_actual_thread_state) {

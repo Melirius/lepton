@@ -12,7 +12,7 @@ std::vector<ThreadHandoff> ThreadHandoff::deserialize(const unsigned char *data,
     if (int( max_size ) < BYTES_PER_HANDOFF * num_threads) {
         custom_exit(ExitCode::VERSION_UNSUPPORTED);
     }
-    for (int i = 0; i< num_threads; ++i) {
+    for (int i = 0; i < num_threads; ++i) {
         ThreadHandoff th = ThreadHandoff::zero();
         th.luma_y_start = data[0] + data[1] * 0x100;
         th.segment_size = data[2] + data[3] * 0x100U + data[4] * 0x10000UL + data[5] * 0x1000000UL;
